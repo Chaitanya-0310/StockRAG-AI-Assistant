@@ -1,0 +1,4 @@
+{
+  "name": "StockRAG AI Analyst",
+  "description": "A RAG-powered financial assistant that ingests market data for 20+ stocks and ETFs, providing advanced technical charts (Candlestick, SMA) and AI-driven insights."
+}
