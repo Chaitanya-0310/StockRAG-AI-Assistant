@@ -3,7 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.db_service import init_db, get_db
 from backend.services.etl_service import ingest_stock_data
 from backend.services.rag_service import generate_rag_response
-from backend.models.schemas import ChatRequest, ChatResponse, IngestResponse, StockResponse, RefreshAllResponse
+from backend.models.schemas import (
+    ChatRequest, ChatResponse, IngestResponse, StockResponse, RefreshAllResponse,
+    TrainModelResponse, PredictionResponse, ModelStatusResponse
+)
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -98,6 +101,64 @@ async def refresh_all_endpoint(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Prediction endpoints
+@app.post("/train/{symbol}", response_model=TrainModelResponse)
+async def train_model_endpoint(symbol: str, db: AsyncSession = Depends(get_db)):
+    """Train ML models for stock price prediction"""
+    try:
+        from backend.services.ml_service import train_all_models
+        
+        results = await train_all_models(symbol.upper(), db)
+        
+        models_trained = [model_type for model_type in results.keys() if 'error' not in results[model_type]]
+        
+        return {
+            "message": f"Training completed for {symbol.upper()}",
+            "symbol": symbol.upper(),
+            "models_trained": models_trained,
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/predict/{symbol}", response_model=PredictionResponse)
+async def get_predictions_endpoint(
+    symbol: str, 
+    days: int = 30,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get price predictions for a stock"""
+    try:
+        from backend.services.prediction_service import generate_predictions, get_predictions_for_symbol
+        
+        # Check if predictions exist and are recent
+        existing_preds = await get_predictions_for_symbol(symbol.upper(), db, days)
+        
+        if not existing_preds:
+            # Generate new predictions
+            await generate_predictions(symbol.upper(), db, days)
+            existing_preds = await get_predictions_for_symbol(symbol.upper(), db, days)
+        
+        return {
+            "symbol": symbol.upper(),
+            "predictions": existing_preds,
+            "days_ahead": len(existing_preds)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/models/{symbol}", response_model=ModelStatusResponse)
+async def get_model_status_endpoint(symbol: str, db: AsyncSession = Depends(get_db)):
+    """Get model training status and performance metrics"""
+    try:
+        from backend.services.prediction_service import get_model_status
+        
+        status = await get_model_status(symbol.upper(), db)
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/")
 async def root():
     return {"message": "StockRAG API is running"}
+

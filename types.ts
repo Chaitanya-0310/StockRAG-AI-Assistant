@@ -16,9 +16,10 @@ export interface StockTicker {
 }
 
 export enum AppTab {
-  DASHBOARD = 'DASHBOARD',
   CHAT = 'CHAT',
+  DASHBOARD = 'DASHBOARD',
   PIPELINE = 'PIPELINE',
+  PREDICTIONS = 'PREDICTIONS'
 }
 
 export interface ChatMessage {

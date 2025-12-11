@@ -29,3 +29,36 @@ class RefreshAllResponse(BaseModel):
     symbols: List[str]
     success_count: int
     failed_count: int
+
+# Prediction-related schemas
+class TrainModelResponse(BaseModel):
+    message: str
+    symbol: str
+    models_trained: List[str]
+    results: dict
+
+class PredictionDataPoint(BaseModel):
+    target_date: str
+    predicted_price: float
+    confidence_lower: float
+    confidence_upper: float
+    prediction_date: str
+
+class PredictionResponse(BaseModel):
+    symbol: str
+    predictions: List[PredictionDataPoint]
+    days_ahead: int
+
+class ModelInfo(BaseModel):
+    type: str
+    version: str
+    training_date: str
+    metrics: dict
+    training_samples: int
+    is_active: bool
+
+class ModelStatusResponse(BaseModel):
+    symbol: str
+    models: List[ModelInfo]
+    status: str
+

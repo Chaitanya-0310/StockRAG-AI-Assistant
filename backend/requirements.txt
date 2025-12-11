@@ -10,3 +10,15 @@ pandas
 pydantic
 pydantic-settings
 requests
+
+# ML and Data Science Dependencies
+torch>=2.0.0
+prophet
+xgboost
+scikit-learn
+mlflow
+joblib
+pandas-ta
+numpy
+matplotlib
+seaborn

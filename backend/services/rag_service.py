@@ -5,6 +5,7 @@ from sqlalchemy import select
 from backend.models.models import RagDocument
 from backend.models.models import StockPrice
 from typing import List
+import re
 
 from dotenv import load_dotenv
 from pathlib import Path
@@ -79,16 +80,96 @@ import logging
 # Configure logging
 logging.basicConfig(filename='backend/error.log', level=logging.ERROR)
 
+def is_prediction_query(query: str) -> bool:
+    """Detect if query is asking about future predictions"""
+    prediction_keywords = [
+        'predict', 'forecast', 'future', 'will', 'next', 'upcoming',
+        'tomorrow', 'week', 'month', 'should i buy', 'should i sell',
+        'going to', 'expected', 'outlook', 'projection'
+    ]
+    
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in prediction_keywords)
+
+def extract_symbol_from_query(query: str) -> str:
+    """Extract stock symbol from query"""
+    # Common stock symbols
+    common_symbols = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA']
+    
+    query_upper = query.upper()
+    for symbol in common_symbols:
+        if symbol in query_upper:
+            return symbol
+    
+    # Try to find ticker pattern (2-5 uppercase letters)
+    match = re.search(r'\b[A-Z]{2,5}\b', query)
+    if match:
+        return match.group(0)
+    
+    return None
+
+async def get_prediction_context(symbol: str, session: AsyncSession) -> str:
+    """Retrieve prediction data for context"""
+    try:
+        from backend.services.prediction_service import get_predictions_for_symbol
+        
+        predictions = await get_predictions_for_symbol(symbol, session, days=30)
+        
+        if not predictions:
+            return f"No predictions available for {symbol}. Models may need to be trained first."
+        
+        # Format predictions for context
+        context = f"\n\n📊 **Price Predictions for {symbol}:**\n\n"
+        
+        # Show 7-day, 14-day, and 30-day predictions
+        for i, days in enumerate([7, 14, 30]):
+            if days <= len(predictions):
+                pred = predictions[days - 1]
+                context += f"**{days}-day forecast:**\n"
+                context += f"- Predicted Price: ${pred['predicted_price']:.2f}\n"
+                context += f"- Confidence Range: ${pred['confidence_lower']:.2f} - ${pred['confidence_upper']:.2f}\n\n"
+        
+        return context
+    except Exception as e:
+        print(f"Error getting prediction context: {e}")
+        return ""
+
 async def generate_rag_response(query: str, session: AsyncSession) -> str:
     try:
-        # 1. Retrieve
-        contexts = await retrieve_context(query, session)
-        context_str = "\n".join(contexts)
+        # Check if this is a prediction query
+        is_pred_query = is_prediction_query(query)
+        
+        context_str = ""
+        
+        if is_pred_query:
+            # Extract symbol
+            symbol = extract_symbol_from_query(query)
+            
+            if symbol:
+                # Get prediction context
+                pred_context = await get_prediction_context(symbol, session)
+                context_str += pred_context
+            
+            # Also get historical context
+            historical_contexts = await retrieve_context(query, session, limit=3)
+            context_str += "\n\n**Historical Data:**\n" + "\n".join(historical_contexts)
+        else:
+            # Regular historical query
+            contexts = await retrieve_context(query, session)
+            context_str = "\n".join(contexts)
         
         # 2. Augment
         system_instruction = f"""
-        You are a financial analyst AI. Use the following context to answer the user's question.
-        And answer in readable format like a human adding bold and italic to make it more readable and also add emojis to make it more engaging.
+        You are a financial analyst AI assistant. Use the following context to answer the user's question.
+        Answer in a readable format like a human, using **bold** and *italic* to make it more readable and add emojis to make it more engaging.
+        
+        If the question is about future predictions:
+        - Provide the prediction data clearly
+        - Include confidence intervals
+        - Explain the trend (bullish/bearish)
+        - Add appropriate disclaimers about prediction uncertainty
+        - Always end with: "⚠️ This is not financial advice. Predictions are based on historical patterns and should not be the sole basis for investment decisions."
+        
         If the answer is not in the context, say you don't have that data.
         
         Context:
@@ -107,3 +188,4 @@ async def generate_rag_response(query: str, session: AsyncSession) -> str:
         logging.error(f"Error generating RAG response: {e}")
         print(f"Error generating RAG response: {e}")
         return f"I encountered an error processing your request. Error: {str(e)}"
+

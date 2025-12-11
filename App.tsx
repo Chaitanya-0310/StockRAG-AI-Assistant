@@ -3,11 +3,14 @@ import { AppTab } from './types';
 import ChatInterface from './components/ChatInterface';
 import StockDashboard from './components/StockDashboard';
 import PipelineVisualizer from './components/PipelineVisualizer';
+import PredictionChart from './components/PredictionChart';
+import ModelDashboard from './components/ModelDashboard';
 import { getAllTickers } from './services/mockDataService';
-import { LayoutDashboard, MessageSquare, DatabaseZap, Terminal } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, DatabaseZap, Terminal, TrendingUp } from 'lucide-react';
 
 function App() {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.CHAT);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>('AAPL');
   const tickerCount = getAllTickers().length;
 
   return (
@@ -22,23 +25,29 @@ function App() {
         </div>
 
         <nav className="p-4 space-y-2 flex-1">
-          <SidebarItem 
-            icon={<MessageSquare size={20} />} 
-            label="AI Analyst" 
-            isActive={activeTab === AppTab.CHAT} 
-            onClick={() => setActiveTab(AppTab.CHAT)} 
+          <SidebarItem
+            icon={<MessageSquare size={20} />}
+            label="AI Analyst"
+            isActive={activeTab === AppTab.CHAT}
+            onClick={() => setActiveTab(AppTab.CHAT)}
           />
-          <SidebarItem 
-            icon={<LayoutDashboard size={20} />} 
-            label="Data Explorer" 
-            isActive={activeTab === AppTab.DASHBOARD} 
-            onClick={() => setActiveTab(AppTab.DASHBOARD)} 
+          <SidebarItem
+            icon={<LayoutDashboard size={20} />}
+            label="Data Explorer"
+            isActive={activeTab === AppTab.DASHBOARD}
+            onClick={() => setActiveTab(AppTab.DASHBOARD)}
           />
-          <SidebarItem 
-            icon={<DatabaseZap size={20} />} 
-            label="ETL Pipeline" 
-            isActive={activeTab === AppTab.PIPELINE} 
-            onClick={() => setActiveTab(AppTab.PIPELINE)} 
+          <SidebarItem
+            icon={<DatabaseZap size={20} />}
+            label="ETL Pipeline"
+            isActive={activeTab === AppTab.PIPELINE}
+            onClick={() => setActiveTab(AppTab.PIPELINE)}
+          />
+          <SidebarItem
+            icon={<TrendingUp size={20} />}
+            label="Predictions"
+            isActive={activeTab === AppTab.PREDICTIONS}
+            onClick={() => setActiveTab(AppTab.PREDICTIONS)}
           />
         </nav>
 
@@ -64,8 +73,9 @@ function App() {
             {activeTab === AppTab.CHAT && 'AI Financial Assistant'}
             {activeTab === AppTab.DASHBOARD && 'Market Data Dashboard'}
             {activeTab === AppTab.PIPELINE && 'Pipeline Configuration'}
+            {activeTab === AppTab.PREDICTIONS && 'Price Predictions & ML Models'}
           </h1>
-          
+
           <div className="hidden md:flex items-center gap-4">
             <div className="text-right">
               <p className="text-sm text-white font-medium">Demo User</p>
@@ -79,10 +89,35 @@ function App() {
 
         <div className="flex-1 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-opacity-20 relative">
           {/* Content Wrapper */}
-          <div className="absolute inset-0 overflow-hidden">
-             {activeTab === AppTab.CHAT && <div className="h-full p-6"><ChatInterface /></div>}
-             {activeTab === AppTab.DASHBOARD && <StockDashboard />}
-             {activeTab === AppTab.PIPELINE && <PipelineVisualizer />}
+          <div className="absolute inset-0 overflow-auto">
+            {activeTab === AppTab.CHAT && <div className="h-full p-6"><ChatInterface /></div>}
+            {activeTab === AppTab.DASHBOARD && <StockDashboard />}
+            {activeTab === AppTab.PIPELINE && <PipelineVisualizer />}
+            {activeTab === AppTab.PREDICTIONS && (
+              <div className="p-6 space-y-6">
+                {/* Symbol Selector */}
+                <div className="flex items-center gap-4">
+                  <label className="text-sm font-medium text-slate-400">Select Stock:</label>
+                  <select
+                    value={selectedSymbol}
+                    onChange={(e) => setSelectedSymbol(e.target.value)}
+                    className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="AAPL">AAPL - Apple</option>
+                    <option value="GOOGL">GOOGL - Google</option>
+                    <option value="MSFT">MSFT - Microsoft</option>
+                    <option value="AMZN">AMZN - Amazon</option>
+                    <option value="TSLA">TSLA - Tesla</option>
+                  </select>
+                </div>
+
+                {/* Prediction Chart */}
+                <PredictionChart symbol={selectedSymbol} days={30} />
+
+                {/* Model Dashboard */}
+                <ModelDashboard symbols={['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA']} />
+              </div>
+            )}
           </div>
         </div>
       </main>
@@ -94,11 +129,10 @@ function App() {
 const SidebarItem = ({ icon, label, isActive, onClick }: { icon: React.ReactNode, label: string, isActive: boolean, onClick: () => void }) => (
   <button
     onClick={onClick}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
-      isActive 
-        ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-600/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]' 
+    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive
+        ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-600/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]'
         : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-    }`}
+      }`}
   >
     <div className={`transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`}>
       {icon}

@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from backend.models.models import StockPrice
+from sqlalchemy import delete
+from backend.models.models import StockPrice, RagDocument
 from backend.services.stock_service import fetch_stock_history
 from backend.services.db_service import get_db
 import pandas as pd
@@ -8,12 +9,21 @@ import pandas as pd
 async def ingest_stock_data(symbol: str, session: AsyncSession):
     """
     Fetches data for a symbol and loads it into the database.
+    Idempotent: deletes existing data for symbol before inserting.
     """
     print(f"Fetching data for {symbol}...")
     df = fetch_stock_history(symbol)
     
-    # Check if data already exists to avoid duplicates (simple check for now)
-    # In production, use upsert or check max date
+    # Delete existing stock prices for this symbol to ensure idempotency
+    print(f"Deleting existing data for {symbol}...")
+    await session.execute(
+        delete(StockPrice).where(StockPrice.symbol == symbol)
+    )
+    
+    # Delete existing RAG documents for this symbol
+    await session.execute(
+        delete(RagDocument).where(RagDocument.symbol == symbol)
+    )
     
     records = []
     for _, row in df.iterrows():
