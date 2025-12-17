@@ -75,38 +75,39 @@ const ChatInterface: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] max-w-5xl mx-auto bg-slate-900/50 backdrop-blur rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
+    <div className="relative h-full flex flex-col">
+      <div className="absolute inset-0 z-0 bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950 animate-gradient-xy" />
+      
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6" ref={scrollRef}>
+      <div className="flex-1 overflow-y-auto p-6 space-y-8 relative z-10" ref={scrollRef}>
         {messages.map((msg) => (
-          <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+          <div key={msg.id} className={`flex items-start gap-4 max-w-4xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
             {/* Avatar */}
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-              msg.role === 'user' ? 'bg-indigo-600' : 'bg-emerald-600'
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 ${
+              msg.role === 'user' ? 'border-indigo-500 bg-indigo-900' : 'border-emerald-500 bg-emerald-900'
             }`}>
-              {msg.role === 'user' ? <User className="w-5 h-5 text-white" /> : <Bot className="w-5 h-5 text-white" />}
+              {msg.role === 'user' ? <User className="w-5 h-5 text-indigo-300" /> : <Bot className="w-5 h-5 text-emerald-300" />}
             </div>
 
-            {/* Message Bubble */}
-            <div className={`flex flex-col max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
+            {/* Message Content */}
+            <div className={`flex flex-col w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`p-4 rounded-2xl text-sm leading-relaxed max-w-3xl ${
                 msg.role === 'user' 
-                  ? 'bg-indigo-600 text-white rounded-tr-none' 
-                  : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700'
+                  ? 'bg-slate-800 border border-slate-700 rounded-br-none' 
+                  : 'bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-bl-none'
               }`}>
                 {msg.isThinking ? (
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 animate-spin" />
-                    <span className="animate-pulse">Retrieving relevant documents...</span>
+                  <div className="flex items-center gap-3 text-slate-400">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse " style={{animationDelay: '0s'}}/>
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse " style={{animationDelay: '0.2s'}}/>
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse " style={{animationDelay: '0.4s'}}/>
                   </div>
                 ) : (
-                  <div className="prose prose-invert prose-sm">
+                  <div className="prose prose-invert prose-sm max-w-none">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
                 )}
               </div>
-
-              {/* RAG Context Visualization (Collapsible) */}
               {msg.ragContext && msg.ragContext.length > 0 && (
                 <RagContextDisplay contexts={msg.ragContext} />
               )}
@@ -116,26 +117,29 @@ const ChatInterface: React.FC = () => {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-slate-950 border-t border-slate-800">
-        <div className="relative flex items-center max-w-4xl mx-auto">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask about AAPL performance, compare stocks, or check trends..."
-            className="w-full bg-slate-900 text-slate-100 placeholder-slate-500 rounded-xl py-4 pl-6 pr-14 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all shadow-inner"
-            disabled={isProcessing}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isProcessing}
-            className="absolute right-2 p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <Send className="w-5 h-5" />
-          </button>
+      <div className="relative z-10 p-4">
+        <div className="relative max-w-4xl mx-auto">
+        <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl" />
+          <div className="relative flex items-center p-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              placeholder="Ask about AAPL performance, compare stocks, or check trends..."
+              className="w-full bg-transparent text-slate-100 placeholder-slate-500 rounded-xl py-3 pl-5 pr-14 border-none focus:ring-0 outline-none"
+              disabled={isProcessing}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || isProcessing}
+              className="absolute right-3 p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          </div>
         </div>
-        <p className="text-center text-xs text-slate-500 mt-2">
+        <p className="text-center text-xs text-slate-500 mt-3">
           Powered by Gemini 2.5 Flash & Simulated Vector Store
         </p>
       </div>
@@ -158,11 +162,11 @@ const RagContextDisplay: React.FC<{ contexts: RagContext[] }> = ({ contexts }) =
       </button>
       
       {isOpen && (
-        <div className="mt-2 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs overflow-hidden">
+        <div className="mt-2 bg-slate-900/80 backdrop-blur-sm border border-slate-800 rounded-lg p-3 text-xs overflow-hidden">
           <p className="font-semibold text-slate-400 mb-2">Retrieved Context (Top 3 shown):</p>
           <div className="space-y-2">
             {contexts.slice(0, 3).map((ctx, idx) => (
-              <div key={idx} className="bg-slate-900 p-2 rounded border-l-2 border-indigo-500">
+              <div key={idx} className="bg-slate-800/50 p-2 rounded border-l-2 border-indigo-500">
                 <div className="flex justify-between text-[10px] text-indigo-300 uppercase font-mono mb-1">
                   <span>{ctx.symbol}</span>
                   <span>{ctx.date}</span>

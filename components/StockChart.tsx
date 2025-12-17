@@ -11,6 +11,7 @@ interface StockChartProps {
   type?: 'area' | 'candle';
   showSMA?: boolean;
   className?: string;
+  detailed?: boolean;
 }
 
 // Custom Tooltip to display OHLC data clearly
@@ -63,7 +64,8 @@ const StockChart: React.FC<StockChartProps> = ({
   color = "#6366f1",
   type = 'area',
   showSMA = false,
-  className = "h-[300px]"
+  className = "h-[300px]",
+  detailed = true,
 }) => {
   const rawId = React.useId();
   const gradientId = rawId.replace(/:/g, "");
@@ -101,6 +103,29 @@ const StockChart: React.FC<StockChartProps> = ({
         No Data Available
       </div>
     );
+  }
+  
+  if (!detailed) {
+    return (
+        <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data}>
+            <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+                <Area 
+                    type="monotone" 
+                    dataKey="close"
+                    stroke={color}
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill={`url(#${gradientId})`}
+                />
+            </AreaChart>
+        </ResponsiveContainer>
+    )
   }
 
   return (
