@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Brain, CheckCircle, XCircle, Clock, TrendingUp, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Brain, CheckCircle, XCircle, Clock, TrendingUp, AlertTriangle, RefreshCw, BarChart3, Target, Zap } from 'lucide-react';
 
 interface ModelMetrics {
     rmse: number;
     mae: number;
+    r2?: number;
+    mape?: number;
     directional_accuracy: number;
 }
 
@@ -25,6 +27,33 @@ interface ModelStatus {
 interface ModelDashboardProps {
     symbols?: string[];
 }
+
+const MODEL_TYPE_META: Record<string, { icon: string; label: string; color: string; description: string }> = {
+    lstm: {
+        icon: '🧠',
+        label: 'LSTM + Attention',
+        color: 'text-purple-400',
+        description: 'Deep recurrent network with multi-head self-attention and residual connections',
+    },
+    transformer: {
+        icon: '⚡',
+        label: 'Transformer',
+        color: 'text-cyan-400',
+        description: 'Pure encoder-based Transformer with positional encoding for temporal patterns',
+    },
+    prophet: {
+        icon: '📈',
+        label: 'Prophet',
+        color: 'text-blue-400',
+        description: 'Bayesian time-series model with automatic seasonality and trend detection',
+    },
+    xgboost: {
+        icon: '🌲',
+        label: 'XGBoost',
+        color: 'text-orange-400',
+        description: 'Gradient boosted trees with cross-validated hyperparameter tuning',
+    },
+};
 
 const ModelDashboard: React.FC<ModelDashboardProps> = ({
     symbols = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA']
@@ -66,7 +95,6 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
             });
 
             if (response.ok) {
-                // Refresh status after training
                 setTimeout(() => {
                     fetchAllModelStatuses();
                     setTraining(prev => ({ ...prev, [symbol]: false }));
@@ -81,22 +109,21 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
         }
     };
 
-    const getModelTypeIcon = (type: string) => {
-        switch (type) {
-            case 'lstm':
-                return '🧠';
-            case 'prophet':
-                return '📈';
-            case 'xgboost':
-                return '🌲';
-            default:
-                return '🤖';
-        }
-    };
-
     const getAccuracyColor = (accuracy: number) => {
         if (accuracy >= 70) return 'text-emerald-400';
         if (accuracy >= 60) return 'text-yellow-400';
+        return 'text-red-400';
+    };
+
+    const getR2Color = (r2: number) => {
+        if (r2 >= 0.8) return 'text-emerald-400';
+        if (r2 >= 0.5) return 'text-yellow-400';
+        return 'text-red-400';
+    };
+
+    const getMapeColor = (mape: number) => {
+        if (mape <= 5) return 'text-emerald-400';
+        if (mape <= 15) return 'text-yellow-400';
         return 'text-red-400';
     };
 
@@ -120,7 +147,9 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
                         <Brain className="text-indigo-400" size={28} />
                         ML Model Dashboard
                     </h2>
-                    <p className="text-slate-400 mt-1">Training status and performance metrics</p>
+                    <p className="text-slate-400 mt-1">
+                        4-model ensemble: LSTM + Attention, Transformer, Prophet, XGBoost
+                    </p>
                 </div>
 
                 <button
@@ -138,12 +167,13 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
                     const status = modelStatuses[symbol];
                     const isTrained = status?.status === 'trained';
                     const isTraining = training[symbol];
+                    const modelList = isTrained ? status.models : [];
 
-                    // Find the model with the highest directional accuracy to display as the "latest" percentage
-                    const latestModel = isTrained
-                        ? status.models.reduce((prev, current) => 
-                            (prev.metrics.directional_accuracy > current.metrics.directional_accuracy) ? prev : current
-                          )
+                    // Best model by directional accuracy
+                    const bestModel = modelList.length > 0
+                        ? modelList.reduce((prev, cur) =>
+                            (prev.metrics.directional_accuracy > cur.metrics.directional_accuracy) ? prev : cur
+                        )
                         : null;
 
                     return (
@@ -163,7 +193,7 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
                                             {isTrained ? (
                                                 <span className="flex items-center gap-1 text-xs text-emerald-400">
                                                     <CheckCircle size={14} />
-                                                    Trained
+                                                    {modelList.length} Models Trained
                                                 </span>
                                             ) : (
                                                 <span className="flex items-center gap-1 text-xs text-slate-500">
@@ -179,9 +209,9 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
                                     onClick={() => trainModel(symbol)}
                                     disabled={isTraining}
                                     className={`px-4 py-2 rounded-lg font-medium transition-all ${isTraining
-                                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                                        }`}
+                                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                        : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                    }`}
                                 >
                                     {isTraining ? (
                                         <span className="flex items-center gap-2">
@@ -194,76 +224,112 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
                                 </button>
                             </div>
 
-                            {/* Latest Accuracy Percentage */}
-                            {latestModel && (
-                                <div className="bg-slate-800/50 rounded-lg p-4 mb-4 border border-slate-700 flex items-center justify-between">
-                                    <div>
-                                        <p className="text-xs text-slate-500 uppercase tracking-wider">Latest Directional Accuracy</p>
-                                        <p className={`text-3xl font-bold ${getAccuracyColor(latestModel.metrics.directional_accuracy)}`}>
-                                            {latestModel.metrics.directional_accuracy.toFixed(1)}%
-                                        </p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-xs text-slate-500">Model Type: <span className="text-white capitalize">{latestModel.type}</span></p>
-                                        <p className="text-xs text-slate-500">Version: <span className="text-white">{latestModel.version}</span></p>
+                            {/* Best Model Highlight */}
+                            {bestModel && (
+                                <div className="bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-lg p-4 mb-4 border border-indigo-500/20">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-xs text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                                                <Target size={12} />
+                                                Best Model — Directional Accuracy
+                                            </p>
+                                            <p className={`text-3xl font-bold ${getAccuracyColor(bestModel.metrics.directional_accuracy)}`}>
+                                                {bestModel.metrics.directional_accuracy.toFixed(1)}%
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-xs text-slate-500">
+                                                Type: <span className={`font-medium ${MODEL_TYPE_META[bestModel.type]?.color || 'text-white'}`}>
+                                                    {MODEL_TYPE_META[bestModel.type]?.label || bestModel.type}
+                                                </span>
+                                            </p>
+                                            <p className="text-xs text-slate-500">Version: <span className="text-white">{bestModel.version}</span></p>
+                                        </div>
                                     </div>
                                 </div>
                             )}
 
-            {/* Models List */}
-            {latestModel && (
-                <div
-                    className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 mt-4"
-                >
-                    <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                            <span className="text-2xl">{getModelTypeIcon(latestModel.type)}</span>
-                            <div>
-                                <h4 className="font-semibold text-white capitalize">
-                                    {latestModel.type}
-                                </h4>
-                                <p className="text-xs text-slate-500">{latestModel.version}</p>
-                            </div>
-                        </div>
+                            {/* Individual Model Cards */}
+                            {modelList.length > 0 && (
+                                <div className="space-y-3">
+                                    {modelList.map((model, idx) => {
+                                        const meta = MODEL_TYPE_META[model.type] || {
+                                            icon: '🤖', label: model.type, color: 'text-white', description: ''
+                                        };
 
-                        <div className={`text-right ${getAccuracyColor(latestModel.metrics.directional_accuracy)}`}>
-                            <div className="text-2xl font-bold">
-                                {latestModel.metrics.directional_accuracy.toFixed(1)}%
-                            </div>
-                            <p className="text-xs text-slate-500">Accuracy</p>
-                        </div>
-                    </div>
+                                        return (
+                                            <div
+                                                key={`${model.type}-${idx}`}
+                                                className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-slate-600 transition-colors"
+                                            >
+                                                {/* Model Header */}
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xl">{meta.icon}</span>
+                                                        <div>
+                                                            <h4 className={`font-semibold ${meta.color}`}>
+                                                                {meta.label}
+                                                            </h4>
+                                                            <p className="text-[10px] text-slate-600 max-w-[260px] truncate">{meta.description}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`text-right ${getAccuracyColor(model.metrics.directional_accuracy)}`}>
+                                                        <div className="text-xl font-bold">
+                                                            {model.metrics.directional_accuracy.toFixed(1)}%
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-500">Dir. Accuracy</p>
+                                                    </div>
+                                                </div>
 
-                    {/* Metrics */}
-                    <div className="grid grid-cols-3 gap-3 text-sm">
-                        <div>
-                            <p className="text-slate-500 text-xs">RMSE</p>
-                            <p className="text-white font-medium">{latestModel.metrics.rmse.toFixed(2)}</p>
-                        </div>
-                        <div>
-                            <p className="text-slate-500 text-xs">MAE</p>
-                            <p className="text-white font-medium">{latestModel.metrics.mae.toFixed(2)}</p>
-                        </div>
-                        <div>
-                            <p className="text-slate-500 text-xs">Samples</p>
-                            <p className="text-white font-medium">{latestModel.training_samples}</p>
-                        </div>
-                    </div>
+                                                {/* Metrics Grid */}
+                                                <div className="grid grid-cols-5 gap-2 text-sm">
+                                                    <div>
+                                                        <p className="text-slate-500 text-[10px] uppercase">RMSE</p>
+                                                        <p className="text-white font-medium text-xs">{model.metrics.rmse.toFixed(3)}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-slate-500 text-[10px] uppercase">MAE</p>
+                                                        <p className="text-white font-medium text-xs">{model.metrics.mae.toFixed(3)}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-slate-500 text-[10px] uppercase">R&sup2;</p>
+                                                        <p className={`font-medium text-xs ${model.metrics.r2 !== undefined ? getR2Color(model.metrics.r2) : 'text-slate-400'}`}>
+                                                            {model.metrics.r2 !== undefined ? model.metrics.r2.toFixed(3) : 'N/A'}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-slate-500 text-[10px] uppercase">MAPE</p>
+                                                        <p className={`font-medium text-xs ${model.metrics.mape !== undefined ? getMapeColor(model.metrics.mape) : 'text-slate-400'}`}>
+                                                            {model.metrics.mape !== undefined ? `${model.metrics.mape.toFixed(1)}%` : 'N/A'}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-slate-500 text-[10px] uppercase">Samples</p>
+                                                        <p className="text-white font-medium text-xs">{model.training_samples.toLocaleString()}</p>
+                                                    </div>
+                                                </div>
 
-                    {/* Training Date */}
-                    <div className="mt-3 pt-3 border-t border-slate-700 flex items-center gap-2 text-xs text-slate-400">
-                        <Clock size={12} />
-                        Trained: {new Date(latestModel.training_date).toLocaleDateString()}
-                    </div>
-                </div>
-            )}
-            {!isTrained && (
-                <div className="text-center py-8 text-slate-500">
-                    <AlertTriangle className="mx-auto mb-2" size={32} />
-                    <p className="text-sm">No models trained yet</p>
-                    <p className="text-xs mt-1">Click "Train Models" to get started</p>
-                </div>
-            )}
+                                                {/* Footer */}
+                                                <div className="mt-3 pt-2 border-t border-slate-700 flex items-center justify-between text-[10px] text-slate-500">
+                                                    <span className="flex items-center gap-1">
+                                                        <Clock size={10} />
+                                                        {new Date(model.training_date).toLocaleDateString()}
+                                                    </span>
+                                                    <span>{model.version}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {!isTrained && (
+                                <div className="text-center py-8 text-slate-500">
+                                    <AlertTriangle className="mx-auto mb-2" size={32} />
+                                    <p className="text-sm">No models trained yet</p>
+                                    <p className="text-xs mt-1">Click "Train Models" to start 4-model ensemble training</p>
+                                </div>
+                            )}
                         </div>
                     );
                 })}
@@ -272,8 +338,12 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
             {/* Info Box */}
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mt-6">
                 <p className="text-sm text-blue-200">
-                    <strong>💡 Tip:</strong> Models should be retrained weekly to capture new market patterns.
-                    Higher directional accuracy ({">"} 60%) indicates better prediction reliability.
+                    <strong>💡 Enhanced Prediction System:</strong> The ensemble combines{' '}
+                    <span className="text-purple-300">LSTM + Attention</span>,{' '}
+                    <span className="text-cyan-300">Transformer</span>,{' '}
+                    <span className="text-blue-300">Prophet</span>, and{' '}
+                    <span className="text-orange-300">XGBoost</span> using softmax-weighted averaging.
+                    Models are weighted by directional accuracy, inverse RMSE, and R&sup2; score for optimal predictions.
                 </p>
             </div>
         </div>

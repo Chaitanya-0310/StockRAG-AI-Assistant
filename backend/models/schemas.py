@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class ChatRequest(BaseModel):
     query: str
@@ -49,6 +49,13 @@ class PredictionResponse(BaseModel):
     predictions: List[PredictionDataPoint]
     days_ahead: int
 
+class ModelMetrics(BaseModel):
+    rmse: Optional[float] = None
+    mae: Optional[float] = None
+    r2: Optional[float] = None
+    mape: Optional[float] = None
+    directional_accuracy: Optional[float] = None
+
 class ModelInfo(BaseModel):
     type: str
     version: str
@@ -61,4 +68,3 @@ class ModelStatusResponse(BaseModel):
     symbol: str
     models: List[ModelInfo]
     status: str
-

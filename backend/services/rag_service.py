@@ -1,11 +1,12 @@
 import os
 import google.generativeai as genai
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from backend.models.models import RagDocument
 from backend.models.models import StockPrice
 from typing import List
 import re
+import numpy as np
 
 from dotenv import load_dotenv
 from pathlib import Path
@@ -15,12 +16,24 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # Configure Gemini
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 EMBEDDING_MODEL = "models/text-embedding-004"
 GENERATION_MODEL = "gemini-2.0-flash"
 
+# Check database type
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+IS_POSTGRES = DATABASE_URL.startswith("postgresql")
+
 async def generate_embedding(text: str) -> List[float]:
+    """Generate text embedding using Google's text-embedding-004 model"""
+    if not GOOGLE_API_KEY:
+        # Fallback: return random embedding for development without API key
+        import random
+        return [random.uniform(-1, 1) for _ in range(768)]
+    
     try:
         result = genai.embed_content(
             model=EMBEDDING_MODEL,
@@ -30,9 +43,11 @@ async def generate_embedding(text: str) -> List[float]:
         return result['embedding']
     except Exception as e:
         print(f"Error generating embedding: {e}")
-        raise
+        # Fallback: return zeros
+        return [0.0] * 768
 
 async def ingest_rag_documents(symbol: str, prices: List[StockPrice], session: AsyncSession):
+    """Generate embeddings and store RAG documents for stock prices"""
     print(f"Ingesting RAG documents for {symbol}...")
     rag_docs = []
     
@@ -46,7 +61,7 @@ async def ingest_rag_documents(symbol: str, prices: List[StockPrice], session: A
                 symbol=symbol,
                 date=p.date,
                 content=content,
-                embedding=embedding
+                embedding=embedding  # Will be Vector for Postgres, JSON for SQLite
             )
             rag_docs.append(doc)
         except Exception as e:
@@ -58,27 +73,58 @@ async def ingest_rag_documents(symbol: str, prices: List[StockPrice], session: A
         await session.commit()
         print(f"Stored {len(rag_docs)} vector documents for {symbol}.")
 
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Calculate cosine similarity between two vectors"""
+    a = np.array(a)
+    b = np.array(b)
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
 async def retrieve_context(query: str, session: AsyncSession, limit: int = 5) -> List[str]:
+    """Retrieve relevant context for a query using vector similarity"""
     try:
+        if not GOOGLE_API_KEY:
+            # Fallback without API key - return recent stock data
+            stmt = select(RagDocument).order_by(RagDocument.date.desc()).limit(limit)
+            result = await session.execute(stmt)
+            docs = result.scalars().all()
+            return [d.content for d in docs]
+        
+        # Generate query embedding
         query_embedding = genai.embed_content(
             model=EMBEDDING_MODEL,
             content=query,
             task_type="retrieval_query"
         )['embedding']
         
-        stmt = select(RagDocument).order_by(RagDocument.embedding.cosine_distance(query_embedding)).limit(limit)
-        result = await session.execute(stmt)
-        docs = result.scalars().all()
+        if IS_POSTGRES:
+            # Use pgvector's cosine distance for PostgreSQL
+            from pgvector.sqlalchemy import Vector
+            stmt = select(RagDocument).order_by(
+                RagDocument.embedding.cosine_distance(query_embedding)
+            ).limit(limit)
+            result = await session.execute(stmt)
+            docs = result.scalars().all()
+        else:
+            # For SQLite, fetch all and compute similarity in Python
+            stmt = select(RagDocument)
+            result = await session.execute(stmt)
+            all_docs = result.scalars().all()
+            
+            # Calculate cosine similarity for each document
+            similarities = []
+            for doc in all_docs:
+                if doc.embedding:
+                    sim = cosine_similarity(query_embedding, doc.embedding)
+                    similarities.append((sim, doc))
+            
+            # Sort by similarity and take top results
+            similarities.sort(key=lambda x: x[0], reverse=True)
+            docs = [doc for _, doc in similarities[:limit]]
         
         return [d.content for d in docs]
     except Exception as e:
         print(f"Error retrieving context: {e}")
         return []
-
-import logging
-
-# Configure logging
-logging.basicConfig(filename='backend/error.log', level=logging.ERROR)
 
 def is_prediction_query(query: str) -> bool:
     """Detect if query is asking about future predictions"""
@@ -94,7 +140,7 @@ def is_prediction_query(query: str) -> bool:
 def extract_symbol_from_query(query: str) -> str:
     """Extract stock symbol from query"""
     # Common stock symbols
-    common_symbols = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA']
+    common_symbols = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA', 'NFLX']
     
     query_upper = query.upper()
     for symbol in common_symbols:
@@ -135,6 +181,7 @@ async def get_prediction_context(symbol: str, session: AsyncSession) -> str:
         return ""
 
 async def generate_rag_response(query: str, session: AsyncSession) -> str:
+    """Generate RAG-based response to user query"""
     try:
         # Check if this is a prediction query
         is_pred_query = is_prediction_query(query)
@@ -158,7 +205,11 @@ async def generate_rag_response(query: str, session: AsyncSession) -> str:
             contexts = await retrieve_context(query, session)
             context_str = "\n".join(contexts)
         
-        # 2. Augment
+        # If no API key, return a mock response
+        if not GOOGLE_API_KEY:
+            return generate_mock_response(query, context_str, is_pred_query)
+        
+        # 2. Augment with system instruction
         system_instruction = f"""
         You are a financial analyst AI assistant. Use the following context to answer the user's question.
         Answer in a readable format like a human, using **bold** and *italic* to make it more readable and add emojis to make it more engaging.
@@ -181,11 +232,57 @@ async def generate_rag_response(query: str, session: AsyncSession) -> str:
             system_instruction=system_instruction
         )
         
-        # 3. Generate (Async)
+        # 3. Generate response
         response = await model.generate_content_async(query)
         return response.text
     except Exception as e:
-        logging.error(f"Error generating RAG response: {e}")
         print(f"Error generating RAG response: {e}")
         return f"I encountered an error processing your request. Error: {str(e)}"
 
+def generate_mock_response(query: str, context: str, is_prediction: bool) -> str:
+    """Generate a mock response when API key is not available"""
+    symbol = extract_symbol_from_query(query)
+    
+    if is_prediction and symbol:
+        return f"""## 📊 Prediction for {symbol}
+
+Based on the available data, here are the key insights:
+
+**Note:** AI predictions are currently unavailable because no Google API key is configured.
+
+To get full AI-powered predictions, please:
+1. Get a Google API key from https://makersuite.google.com/app/apikey
+2. Add it to your `.env` file: `GOOGLE_API_KEY=your-key-here`
+3. Restart the server
+
+⚠️ This is not financial advice. Predictions are based on historical patterns and should not be the sole basis for investment decisions."""
+    
+    if symbol and context:
+        return f"""## 📈 {symbol} Stock Analysis
+
+{context[:500]}...
+
+**Note:** For AI-generated insights, please configure your Google API key in the `.env` file.
+
+You can ask about:
+- Historical price data
+- 30-day price predictions
+- Stock comparisons
+- Market trends
+
+⚠️ This is not financial advice."""
+    
+    return """## AI Financial Assistant
+
+I can help you with:
+- 📊 Stock price predictions (30-day forecasts)
+- 📈 Historical data analysis
+- 🔍 Technical indicators
+- 💡 Investment insights
+
+**To get started:**
+1. Enter a stock symbol like "AAPL" or "TSLA"
+2. Ask a question like "What will AAPL price be next week?"
+3. Configure your Google API key for AI-powered responses
+
+⚠️ This is not financial advice. Always do your own research before making investment decisions."""

@@ -26,4 +26,8 @@ dist-ssr
 .env.example
 .docker-compose.yml 
 
-backend/services/__pycache__/etl_service.cpython-313.pyc
+__pycache__/
+*.pyc
+*.pyo
+backend/ml_models/
+*.db

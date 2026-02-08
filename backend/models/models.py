@@ -1,9 +1,23 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, Boolean, JSON
 from sqlalchemy.orm import declarative_base
-from pgvector.sqlalchemy import Vector
 from datetime import datetime
+import os
 
 Base = declarative_base()
+
+# Check if using PostgreSQL with pgvector support
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+IS_POSTGRES = DATABASE_URL.startswith("postgresql")
+
+# Import Vector only if using PostgreSQL
+if IS_POSTGRES:
+    try:
+        from pgvector.sqlalchemy import Vector
+        HAS_VECTOR = True
+    except ImportError:
+        HAS_VECTOR = False
+else:
+    HAS_VECTOR = False
 
 class StockPrice(Base):
     __tablename__ = "stock_prices"
@@ -24,7 +38,11 @@ class RagDocument(Base):
     symbol = Column(String, index=True)
     date = Column(Date)
     content = Column(Text)  # The text chunk
-    embedding = Column(Vector(768))  # Google text-embedding-004 dimension is 768
+    # Use Vector type for PostgreSQL, otherwise use JSON to store embedding as array
+    if HAS_VECTOR:
+        embedding = Column(Vector(768))  # Google text-embedding-004 dimension is 768
+    else:
+        embedding = Column(JSON)  # Store as JSON array for SQLite
 
 class StockPrediction(Base):
     __tablename__ = "stock_predictions"
