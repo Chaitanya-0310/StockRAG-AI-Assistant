@@ -1,11 +1,14 @@
+import asyncio
+import logging
 import os
-import google.generativeai as genai
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from backend.models.models import RagDocument
-from backend.models.models import StockPrice
-from typing import List
 import re
+from typing import Iterable, List, Optional
+
+import google.generativeai as genai
+from sqlalchemy import insert, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.models.models import RagDocument
 
 from dotenv import load_dotenv
 from pathlib import Path
@@ -20,53 +23,95 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 EMBEDDING_MODEL = "models/text-embedding-004"
 GENERATION_MODEL = "gemini-2.0-flash"
 
+async def _embed_content_async(content: str, task_type: str) -> List[float]:
+    result = await asyncio.to_thread(
+        genai.embed_content,
+        model=EMBEDDING_MODEL,
+        content=content,
+        task_type=task_type,
+    )
+    return result["embedding"]
+
 async def generate_embedding(text: str) -> List[float]:
     try:
-        result = genai.embed_content(
-            model=EMBEDDING_MODEL,
-            content=text,
-            task_type="retrieval_document"
-        )
-        return result['embedding']
+        return await _embed_content_async(text, "retrieval_document")
     except Exception as e:
         print(f"Error generating embedding: {e}")
         raise
 
-async def ingest_rag_documents(symbol: str, prices: List[StockPrice], session: AsyncSession):
+async def generate_query_embedding(text: str) -> List[float]:
+    try:
+        return await _embed_content_async(text, "retrieval_query")
+    except Exception as e:
+        print(f"Error generating query embedding: {e}")
+        raise
+
+def _get_row_value(row: object, key: str):
+    return row[key] if isinstance(row, dict) else getattr(row, key)
+
+def _format_currency(value: object) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+async def _embed_texts(texts: List[str], concurrency: int = 5) -> List[Optional[List[float]]]:
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _embed(text: str) -> Optional[List[float]]:
+        async with semaphore:
+            try:
+                return await generate_embedding(text)
+            except Exception as exc:
+                print(f"Skipping document due to embedding error: {exc}")
+                return None
+
+    return await asyncio.gather(*[_embed(text) for text in texts])
+
+async def ingest_rag_documents(symbol: str, prices: Iterable[object], session: AsyncSession):
     print(f"Ingesting RAG documents for {symbol}...")
-    rag_docs = []
-    
+    rag_rows = []
+    texts = []
+
     for p in prices:
-        content = f"On {p.date}, {symbol} opened at ${p.open}, reached a high of ${p.high}, low of ${p.low}, and closed at ${p.close}. Volume was {p.volume}."
-        
-        try:
-            embedding = await generate_embedding(content)
-            
-            doc = RagDocument(
-                symbol=symbol,
-                date=p.date,
-                content=content,
-                embedding=embedding
-            )
-            rag_docs.append(doc)
-        except Exception as e:
-            print(f"Skipping document due to embedding error: {e}")
-            continue
-    
-    if rag_docs:
-        session.add_all(rag_docs)
+        date_value = _get_row_value(p, "date")
+        content = (
+            f"On {date_value}, {symbol} opened at ${_format_currency(_get_row_value(p, 'open'))}, "
+            f"reached a high of ${_format_currency(_get_row_value(p, 'high'))}, "
+            f"low of ${_format_currency(_get_row_value(p, 'low'))}, "
+            f"and closed at ${_format_currency(_get_row_value(p, 'close'))}. "
+            f"Volume was {_get_row_value(p, 'volume')}."
+        )
+        texts.append(content)
+        rag_rows.append({"symbol": symbol, "date": date_value, "content": content})
+
+    if not rag_rows:
+        print(f"No documents to ingest for {symbol}.")
+        return
+
+    embeddings = await _embed_texts(texts)
+
+    docs_to_insert = []
+    for row, embedding in zip(rag_rows, embeddings):
+        if embedding:
+            docs_to_insert.append({**row, "embedding": embedding})
+
+    if docs_to_insert:
+        await session.execute(insert(RagDocument), docs_to_insert)
         await session.commit()
-        print(f"Stored {len(rag_docs)} vector documents for {symbol}.")
+        print(f"Stored {len(docs_to_insert)} vector documents for {symbol}.")
+    else:
+        print(f"No embeddings available for {symbol}. Skipping insert.")
 
 async def retrieve_context(query: str, session: AsyncSession, limit: int = 5) -> List[str]:
     try:
-        query_embedding = genai.embed_content(
-            model=EMBEDDING_MODEL,
-            content=query,
-            task_type="retrieval_query"
-        )['embedding']
-        
-        stmt = select(RagDocument).order_by(RagDocument.embedding.cosine_distance(query_embedding)).limit(limit)
+        query_embedding = await generate_query_embedding(query)
+        stmt = select(RagDocument).order_by(
+            RagDocument.embedding.cosine_distance(query_embedding)
+        ).limit(limit)
+        symbol = extract_symbol_from_query(query)
+        if symbol:
+            stmt = stmt.where(RagDocument.symbol == symbol)
         result = await session.execute(stmt)
         docs = result.scalars().all()
         
@@ -74,8 +119,6 @@ async def retrieve_context(query: str, session: AsyncSession, limit: int = 5) ->
     except Exception as e:
         print(f"Error retrieving context: {e}")
         return []
-
-import logging
 
 # Configure logging
 logging.basicConfig(filename='backend/error.log', level=logging.ERROR)
@@ -91,14 +134,33 @@ def is_prediction_query(query: str) -> bool:
     query_lower = query.lower()
     return any(keyword in query_lower for keyword in prediction_keywords)
 
-def extract_symbol_from_query(query: str) -> str:
+COMPANY_SYMBOL_MAP = {
+    "APPLE": "AAPL",
+    "ALPHABET": "GOOGL",
+    "GOOGLE": "GOOGL",
+    "MICROSOFT": "MSFT",
+    "AMAZON": "AMZN",
+    "TESLA": "TSLA",
+    "META": "META",
+    "NVIDIA": "NVDA",
+}
+
+def extract_symbol_from_query(query: str) -> Optional[str]:
     """Extract stock symbol from query"""
     # Common stock symbols
     common_symbols = ['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA']
     
     query_upper = query.upper()
+    dollar_match = re.search(r'\$([A-Z]{1,5})\b', query_upper)
+    if dollar_match:
+        return dollar_match.group(1)
+
     for symbol in common_symbols:
         if symbol in query_upper:
+            return symbol
+
+    for company, symbol in COMPANY_SYMBOL_MAP.items():
+        if company in query_upper:
             return symbol
     
     # Try to find ticker pattern (2-5 uppercase letters)
@@ -158,6 +220,12 @@ async def generate_rag_response(query: str, session: AsyncSession) -> str:
             contexts = await retrieve_context(query, session)
             context_str = "\n".join(contexts)
         
+        if not context_str.strip():
+            return (
+                "I couldn't find enough stock data to answer that yet. "
+                "Try asking about a specific ticker (e.g., AAPL, MSFT) or ingest data first."
+            )
+
         # 2. Augment
         system_instruction = f"""
         You are a financial analyst AI assistant. Use the following context to answer the user's question.
@@ -188,4 +256,3 @@ async def generate_rag_response(query: str, session: AsyncSession) -> str:
         logging.error(f"Error generating RAG response: {e}")
         print(f"Error generating RAG response: {e}")
         return f"I encountered an error processing your request. Error: {str(e)}"
-

@@ -212,19 +212,94 @@ async def _predict_xgboost(
     # Predict iteratively
     predictions = []
     last_features = df[feature_cols].iloc[-1:].values
-    
+    feature_state = {col: float(last_features[0][idx]) for idx, col in enumerate(feature_cols)}
+
     for i in range(days_ahead):
         pred_price = model.predict(last_features)[0]
-        
+
         predictions.append({
-            'day': i + 1,
-            'price': float(pred_price)
+            "day": i + 1,
+            "price": float(pred_price),
         })
-        
-        # Update features (simplified)
-        # In production, you'd update all lagged features properly
-    
+
+        if "close" in feature_state:
+            feature_state["close"] = float(pred_price)
+
+        for lag in [10, 5, 3, 2, 1]:
+            close_key = f"close_lag_{lag}"
+            if close_key in feature_state:
+                if lag == 1:
+                    feature_state[close_key] = float(pred_price)
+                else:
+                    prev_key = f"close_lag_{lag - 1}"
+                    feature_state[close_key] = feature_state.get(prev_key, feature_state[close_key])
+
+            volume_key = f"volume_lag_{lag}"
+            if volume_key in feature_state:
+                if lag == 1 and "volume" in feature_state:
+                    feature_state[volume_key] = feature_state["volume"]
+                else:
+                    prev_key = f"volume_lag_{lag - 1}"
+                    feature_state[volume_key] = feature_state.get(prev_key, feature_state[volume_key])
+
+        last_features = np.array([[feature_state[col] for col in feature_cols]])
+
     return predictions
+
+
+def _calculate_model_weights(
+    predictions_by_model: Dict[str, List[Dict]],
+    models: List[MLModel]
+) -> Dict[str, float]:
+    weights = {}
+    total_weight = 0.0
+
+    for model in models:
+        if model.model_type not in predictions_by_model:
+            continue
+        metrics = model.metrics or {}
+        rmse = metrics.get("rmse")
+        mae = metrics.get("mae")
+        directional_accuracy = metrics.get("directional_accuracy")
+
+        weight = 0.0
+        if rmse and rmse > 0:
+            weight = 1.0 / rmse
+        elif mae and mae > 0:
+            weight = 1.0 / mae
+        elif directional_accuracy:
+            weight = directional_accuracy / 100.0
+
+        if weight <= 0:
+            weight = 1.0
+
+        weights[model.model_type] = weight
+        total_weight += weight
+
+    if total_weight == 0:
+        return {k: 1.0 / len(predictions_by_model) for k in predictions_by_model.keys()}
+
+    return {k: v / total_weight for k, v in weights.items()}
+
+
+def _estimate_interval(
+    weighted_price: float,
+    model_prices: List[float],
+    prophet_bounds: Optional[Tuple[float, float]]
+) -> Tuple[float, float]:
+    if len(model_prices) > 1:
+        spread = float(np.std(model_prices))
+        lower = weighted_price - (1.5 * spread)
+        upper = weighted_price + (1.5 * spread)
+    else:
+        lower = weighted_price * 0.9
+        upper = weighted_price * 1.1
+
+    if prophet_bounds:
+        lower = min(lower, prophet_bounds[0])
+        upper = max(upper, prophet_bounds[1])
+
+    return lower, upper
 
 
 def _ensemble_predictions(
@@ -232,59 +307,36 @@ def _ensemble_predictions(
     models: List[MLModel]
 ) -> List[Dict]:
     """
-    Combine predictions from multiple models using weighted average
-    
-    Weights based on directional accuracy from training
+    Combine predictions from multiple models using weighted average.
     """
-    # Calculate weights from model metrics
-    weights = {}
-    total_weight = 0
-    
-    for model in models:
-        if model.model_type in predictions_by_model:
-            # Use directional accuracy as weight
-            acc = model.metrics.get('directional_accuracy', 50)
-            weight = acc / 100.0
-            weights[model.model_type] = weight
-            total_weight += weight
-    
-    # Normalize weights
-    if total_weight > 0:
-        weights = {k: v / total_weight for k, v in weights.items()}
-    else:
-        # Equal weights if no metrics
-        weights = {k: 1.0 / len(predictions_by_model) for k in predictions_by_model.keys()}
-    
-    # Combine predictions
+    weights = _calculate_model_weights(predictions_by_model, models)
+
     ensemble = []
-    days_ahead = len(list(predictions_by_model.values())[0])
-    
+    days_ahead = min(len(preds) for preds in predictions_by_model.values())
+
     for day in range(days_ahead):
-        weighted_price = 0
-        lower_bound = float('inf')
-        upper_bound = float('-inf')
-        
+        weighted_price = 0.0
+        prophet_bounds = None
+        model_prices = []
+
         for model_type, preds in predictions_by_model.items():
-            weight = weights[model_type]
-            weighted_price += preds[day]['price'] * weight
-            
-            # Use Prophet's confidence intervals if available
-            if 'lower' in preds[day]:
-                lower_bound = min(lower_bound, preds[day]['lower'])
-                upper_bound = max(upper_bound, preds[day]['upper'])
-        
-        # If no confidence intervals, estimate as ±10%
-        if lower_bound == float('inf'):
-            lower_bound = weighted_price * 0.9
-            upper_bound = weighted_price * 1.1
-        
+            weight = weights.get(model_type, 0.0)
+            price = preds[day]["price"]
+            model_prices.append(price)
+            weighted_price += price * weight
+
+            if "lower" in preds[day] and "upper" in preds[day]:
+                prophet_bounds = (preds[day]["lower"], preds[day]["upper"])
+
+        lower_bound, upper_bound = _estimate_interval(weighted_price, model_prices, prophet_bounds)
+
         ensemble.append({
-            'day': day + 1,
-            'predicted_price': float(weighted_price),
-            'confidence_lower': float(lower_bound),
-            'confidence_upper': float(upper_bound)
+            "day": day + 1,
+            "predicted_price": float(weighted_price),
+            "confidence_lower": float(lower_bound),
+            "confidence_upper": float(upper_bound),
         })
-    
+
     return ensemble
 
 

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.db_service import init_db, get_db
-from backend.services.etl_service import ingest_stock_data
+from backend.services.etl_service import ingest_stock_data, ingest_latest_stock_data
 from backend.services.rag_service import generate_rag_response
 from backend.models.schemas import (
     ChatRequest, ChatResponse, IngestResponse, StockResponse, RefreshAllResponse,
@@ -33,6 +33,15 @@ async def ingest_endpoint(symbol: str, db: AsyncSession = Depends(get_db)):
     try:
         await ingest_stock_data(symbol.upper(), db)
         return {"message": "Ingestion successful", "symbol": symbol.upper()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ingest-latest/{symbol}", response_model=IngestResponse)
+async def ingest_latest_endpoint(symbol: str, db: AsyncSession = Depends(get_db)):
+    try:
+        await ingest_latest_stock_data(symbol.upper(), db)
+        return {"message": "Latest ingestion successful", "symbol": symbol.upper()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -161,4 +170,3 @@ async def get_model_status_endpoint(symbol: str, db: AsyncSession = Depends(get_
 @app.get("/")
 async def root():
     return {"message": "StockRAG API is running"}
-
