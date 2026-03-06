@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getAllTickers } from '../services/stockService';
 import { refreshAllData } from '../services/api';
 import { StockTicker } from '../types';
 import StockChart from './StockChart';
-import { TrendingUp, TrendingDown, Search, Loader2, RefreshCw, LineChart, BarChart2, Activity, SlidersHorizontal } from 'lucide-react';
+import {
+  AreaChart as CompAreaChart, Area as CompArea, XAxis as CompXAxis, YAxis as CompYAxis,
+  CartesianGrid as CompGrid, Tooltip as CompTooltip, Legend as CompLegend, ResponsiveContainer as CompRC
+} from 'recharts';
+import { TrendingUp, TrendingDown, Search, Loader2, RefreshCw, LineChart, BarChart2, Activity, Download } from 'lucide-react';
 
 const StockDashboard: React.FC = () => {
   const [allTickers, setAllTickers] = useState<StockTicker[]>([]);
@@ -12,18 +16,19 @@ const StockDashboard: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTicker, setSelectedTicker] = useState<StockTicker | null>(null);
 
-  // Chart Controls State
   const [chartType, setChartType] = useState<'area' | 'candle'>('area');
   const [showSMA, setShowSMA] = useState(false);
+
+  // Comparison mode
+  const [compareSymbols, setCompareSymbols] = useState<string[]>([]);
+  const [showCompare, setShowCompare] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const tickers = await getAllTickers();
         setAllTickers(tickers);
-        if (tickers.length > 0) {
-          setSelectedTicker(tickers[0]);
-        }
+        if (tickers.length > 0) setSelectedTicker(tickers[0]);
       } catch (error) {
         console.error("Failed to fetch tickers:", error);
       } finally {
@@ -45,6 +50,52 @@ const StockDashboard: React.FC = () => {
       setRefreshing(false);
     }
   };
+
+  const exportCSV = () => {
+    if (!selectedTicker) return;
+    const headers = 'Date,Open,High,Low,Close,Volume\n';
+    const rows = selectedTicker.data.map(d =>
+      `${d.date},${d.open},${d.high},${d.low},${d.close},${d.volume}`
+    ).join('\n');
+    const blob = new Blob([headers + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selectedTicker.symbol}_data.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleCompare = (symbol: string) => {
+    setCompareSymbols(prev => {
+      if (prev.includes(symbol)) return prev.filter(s => s !== symbol);
+      if (prev.length >= 4) return prev;
+      return [...prev, symbol];
+    });
+  };
+
+  // Comparison chart data: normalize to % change
+  const comparisonData = useMemo(() => {
+    if (compareSymbols.length < 2) return [];
+    const tickerMap = new Map(allTickers.map(t => [t.symbol, t]));
+    const series = compareSymbols.map(sym => tickerMap.get(sym)).filter(Boolean) as StockTicker[];
+    if (series.length < 2) return [];
+
+    // Use shortest series length
+    const minLen = Math.min(...series.map(s => s.data.length));
+    const result: any[] = [];
+
+    for (let i = 0; i < minLen; i++) {
+      const point: any = { date: series[0].data[i].date };
+      for (const ticker of series) {
+        const base = ticker.data[0].close;
+        const change = ((ticker.data[i].close - base) / base) * 100;
+        point[ticker.symbol] = parseFloat(change.toFixed(2));
+      }
+      result.push(point);
+    }
+    return result;
+  }, [compareSymbols, allTickers]);
 
   const filteredTickers = allTickers.filter(t =>
     t.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -85,14 +136,18 @@ const StockDashboard: React.FC = () => {
                 <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${showSMA ? 'bg-amber-500 border-amber-500' : 'border-slate-600 bg-slate-800'}`}>
                   {showSMA && <Activity className="w-3 h-3 text-black" />}
                 </div>
-                <input
-                  type="checkbox"
-                  checked={showSMA}
-                  onChange={(e) => setShowSMA(e.target.checked)}
-                  className="hidden"
-                />
+                <input type="checkbox" checked={showSMA} onChange={(e) => setShowSMA(e.target.checked)} className="hidden" />
                 Show SMA (20)
-              </label>
+            </label>
+            <button onClick={exportCSV} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-all">
+              <Download className="w-4 h-4" /> CSV
+            </button>
+            <button
+              onClick={() => setShowCompare(!showCompare)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${showCompare ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Compare
+            </button>
           </div>
         </div>
         <div className="flex items-baseline gap-4">
@@ -102,10 +157,54 @@ const StockDashboard: React.FC = () => {
             {change.toFixed(2)} ({changePercent.toFixed(2)}%)
           </span>
         </div>
+
+        {/* Compare selector */}
+        {showCompare && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <span className="text-xs text-slate-500 self-center">Select up to 4:</span>
+            {allTickers.map(t => (
+              <button
+                key={t.symbol}
+                onClick={() => toggleCompare(t.symbol)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                  compareSymbols.includes(t.symbol)
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                } ${compareSymbols.length >= 4 && !compareSymbols.includes(t.symbol) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={compareSymbols.length >= 4 && !compareSymbols.includes(t.symbol)}
+              >
+                {t.symbol}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
-  
+
+  const ComparisonChart = () => {
+    if (comparisonData.length === 0) return null;
+    const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444'];
+
+    return (
+      <div className="p-6 border-t border-slate-800">
+        <h3 className="text-lg font-bold text-white mb-4">Comparison (% Change)</h3>
+        <CompRC width="100%" height={300}>
+          <CompAreaChart data={comparisonData}>
+            <CompGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+            <CompXAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={(s: string) => { const d = new Date(s); return `${d.getMonth()+1}/${d.getDate()}`; }} minTickGap={30} />
+            <CompYAxis stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+            <CompTooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} formatter={(v: number) => `${v.toFixed(2)}%`} />
+            <CompLegend />
+            {compareSymbols.map((sym, i) => (
+              <CompArea key={sym} type="monotone" dataKey={sym} stroke={colors[i % colors.length]} fill="none" strokeWidth={2} dot={false} />
+            ))}
+          </CompAreaChart>
+        </CompRC>
+      </div>
+    );
+  };
+
   const StatsBar = () => {
     if(!selectedTicker) return null;
     const latest = selectedTicker.data[selectedTicker.data.length - 1];
@@ -137,14 +236,14 @@ const StockDashboard: React.FC = () => {
       </div>
     );
   }
-  
+
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-80px)] bg-slate-950">
-      {/* Main Content (Left Column) */}
       <main className="flex-1 flex flex-col min-h-0">
         <MainChartHeader />
+        {showCompare && compareSymbols.length >= 2 && <ComparisonChart />}
         <div className="flex-1 p-1 sm:p-2 md:p-4 lg:p-6 bg-slate-900 min-h-0">
-         {selectedTicker && <StockChart 
+         {selectedTicker && <StockChart
             data={selectedTicker.data}
             type={chartType}
             showSMA={showSMA}
@@ -155,7 +254,6 @@ const StockDashboard: React.FC = () => {
         <StatsBar />
       </main>
 
-      {/* Watchlist (Right Column) */}
       <aside className="w-full md:w-1/3 lg:w-1/4 border-t md:border-t-0 md:border-l border-slate-800 flex flex-col">
         <div className="p-4 border-b border-slate-800 flex items-center gap-2">
         <div className="relative w-full">
@@ -195,7 +293,7 @@ const StockDashboard: React.FC = () => {
                   <p className="text-xs text-slate-400 truncate">{ticker.name}</p>
                 </div>
                 <div className="w-1/3 h-10">
-                    <StockChart 
+                    <StockChart
                         data={ticker.data.slice(-30)}
                         color={isPositive ? '#10b981' : '#f43f5e'}
                         className="h-full w-full"

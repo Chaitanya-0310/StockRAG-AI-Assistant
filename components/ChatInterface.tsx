@@ -1,18 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, RagContext } from '../types';
 import { generateRAGResponse } from '../services/geminiService';
-import { Send, Bot, User, Database, ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
+import { Send, Bot, User, Database, ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
-const ChatInterface: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'system',
-      content: 'Hello! I am your AI Financial Analyst. I have access to the latest stock data for AAPL, NVDA, GOOGL, AMZN, and NFLX. Ask me about trends, comparisons, or specific price action.',
-      timestamp: Date.now()
+const STORAGE_KEY = 'stockrag-chat-history';
+
+const DEFAULT_WELCOME: ChatMessage = {
+  id: 'welcome',
+  role: 'system',
+  content: 'Hello! I am your AI Financial Analyst. Ask me about stock trends, comparisons, predictions, or specific price action.',
+  timestamp: Date.now()
+};
+
+function loadMessages(): ChatMessage[] {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
-  ]);
+  } catch {}
+  return [DEFAULT_WELCOME];
+}
+
+function saveMessages(messages: ChatMessage[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+  } catch {}
+}
+
+const ChatInterface: React.FC = () => {
+  const [messages, setMessages] = useState<ChatMessage[]>(loadMessages);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -21,6 +40,10 @@ const ChatInterface: React.FC = () => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
+  }, [messages]);
+
+  useEffect(() => {
+    saveMessages(messages);
   }, [messages]);
 
   const handleSend = async () => {
@@ -37,7 +60,6 @@ const ChatInterface: React.FC = () => {
     setInput('');
     setIsProcessing(true);
 
-    // Add a placeholder "Thinking" message
     const thinkingId = (Date.now() + 1).toString();
     setMessages(prev => [...prev, {
       id: thinkingId,
@@ -49,8 +71,7 @@ const ChatInterface: React.FC = () => {
 
     try {
       const response = await generateRAGResponse(userMsg.content, messages);
-      
-      // Replace thinking message with real response
+
       setMessages(prev => prev.map(msg => {
         if (msg.id === thinkingId) {
           return {
@@ -62,7 +83,7 @@ const ChatInterface: React.FC = () => {
         }
         return msg;
       }));
-    } catch (e) {
+    } catch {
       setMessages(prev => prev.map(msg => {
         if (msg.id === thinkingId) {
           return { ...msg, content: "Sorry, something went wrong.", isThinking: false };
@@ -74,33 +95,85 @@ const ChatInterface: React.FC = () => {
     }
   };
 
+  const handleClearChat = () => {
+    setMessages([DEFAULT_WELCOME]);
+    localStorage.removeItem(STORAGE_KEY);
+  };
+
+  const exportChat = () => {
+    const exportData = messages
+      .filter(m => !m.isThinking)
+      .map(m => ({
+        role: m.role,
+        content: m.content,
+        timestamp: new Date(m.timestamp).toISOString()
+      }));
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stockrag-chat-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="relative h-full flex flex-col">
+    <div className="relative h-full flex flex-col overflow-hidden">
       <div className="absolute inset-0 z-0 bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950 animate-gradient-xy" />
-      
+
+      {/* Top Bar */}
+      <div className="relative z-10 flex items-center justify-end gap-2 px-6 pt-3">
+        <button
+          onClick={exportChat}
+          className="text-xs text-slate-500 hover:text-indigo-400 transition-colors px-2 py-1"
+        >
+          Export JSON
+        </button>
+        <button
+          onClick={() => {
+            const md = messages
+              .filter(m => !m.isThinking)
+              .map(m => `**${m.role}:** ${m.content}`)
+              .join('\n\n---\n\n');
+            const blob = new Blob([md], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `stockrag-chat-${new Date().toISOString().split('T')[0]}.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="text-xs text-slate-500 hover:text-indigo-400 transition-colors px-2 py-1"
+        >
+          Export Markdown
+        </button>
+        <button
+          onClick={handleClearChat}
+          className="text-xs text-slate-500 hover:text-red-400 transition-colors px-2 py-1 flex items-center gap-1"
+        >
+          <Trash2 size={12} /> Clear Chat
+        </button>
+      </div>
+
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-8 relative z-10" ref={scrollRef}>
+      <div className="flex-1 overflow-y-auto p-6 space-y-8 relative z-10 scroll-smooth min-h-0" ref={scrollRef}>
         {messages.map((msg) => (
           <div key={msg.id} className={`flex items-start gap-4 max-w-4xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            {/* Avatar */}
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 ${
-              msg.role === 'user' ? 'border-indigo-500 bg-indigo-900' : 'border-emerald-500 bg-emerald-900'
-            }`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 ${msg.role === 'user' ? 'border-indigo-500 bg-indigo-900' : 'border-emerald-500 bg-emerald-900'}`}>
               {msg.role === 'user' ? <User className="w-5 h-5 text-indigo-300" /> : <Bot className="w-5 h-5 text-emerald-300" />}
             </div>
 
-            {/* Message Content */}
             <div className={`flex flex-col w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`p-4 rounded-2xl text-sm leading-relaxed max-w-3xl ${
-                msg.role === 'user' 
-                  ? 'bg-slate-800 border border-slate-700 rounded-br-none' 
-                  : 'bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-bl-none'
-              }`}>
+              <div className={`p-4 rounded-2xl text-sm leading-relaxed max-w-3xl ${msg.role === 'user'
+                ? 'bg-slate-800 border border-slate-700 rounded-br-none'
+                : 'bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-bl-none'
+                }`}>
                 {msg.isThinking ? (
                   <div className="flex items-center gap-3 text-slate-400">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse " style={{animationDelay: '0s'}}/>
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse " style={{animationDelay: '0.2s'}}/>
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse " style={{animationDelay: '0.4s'}}/>
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" style={{ animationDelay: '0s' }} />
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }} />
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }} />
                   </div>
                 ) : (
                   <div className="prose prose-invert prose-sm max-w-none">
@@ -117,16 +190,16 @@ const ChatInterface: React.FC = () => {
       </div>
 
       {/* Input Area */}
-      <div className="relative z-10 p-4">
+      <div className="relative z-10 p-4 shrink-0">
         <div className="relative max-w-4xl mx-auto">
-        <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl" />
+          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl" />
           <div className="relative flex items-center p-2">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="Ask about AAPL performance, compare stocks, or check trends..."
+              placeholder="Ask about stock performance, compare stocks, or check predictions..."
               className="w-full bg-transparent text-slate-100 placeholder-slate-500 rounded-xl py-3 pl-5 pr-14 border-none focus:ring-0 outline-none"
               disabled={isProcessing}
             />
@@ -140,7 +213,7 @@ const ChatInterface: React.FC = () => {
           </div>
         </div>
         <p className="text-center text-xs text-slate-500 mt-3">
-          Powered by Gemini 2.5 Flash & Simulated Vector Store
+          Powered by Gemini 2.5 Flash & pgvector RAG
         </p>
       </div>
     </div>
@@ -152,7 +225,7 @@ const RagContextDisplay: React.FC<{ contexts: RagContext[] }> = ({ contexts }) =
 
   return (
     <div className="mt-2 w-full max-w-md">
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 text-xs text-slate-500 hover:text-indigo-400 transition-colors"
       >
@@ -160,7 +233,7 @@ const RagContextDisplay: React.FC<{ contexts: RagContext[] }> = ({ contexts }) =
         <Database className="w-3 h-3" />
         Used {contexts.length} Retrieval Fragments
       </button>
-      
+
       {isOpen && (
         <div className="mt-2 bg-slate-900/80 backdrop-blur-sm border border-slate-800 rounded-lg p-3 text-xs overflow-hidden">
           <p className="font-semibold text-slate-400 mb-2">Retrieved Context (Top 3 shown):</p>

@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Brain, CheckCircle, XCircle, Clock, TrendingUp, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Brain, CheckCircle, XCircle, Clock, AlertTriangle, RefreshCw } from 'lucide-react';
+import { API_BASE_URL } from '../services/api';
 
 interface ModelMetrics {
     rmse: number;
     mae: number;
     directional_accuracy: number;
+    feature_importances?: Record<string, number>;
 }
 
 interface ModelInfo {
@@ -22,6 +24,11 @@ interface ModelStatus {
     status: string;
 }
 
+interface FeatureImportance {
+    name: string;
+    importance: number;
+}
+
 interface ModelDashboardProps {
     symbols?: string[];
 }
@@ -32,6 +39,7 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
     const [modelStatuses, setModelStatuses] = useState<Record<string, ModelStatus>>({});
     const [loading, setLoading] = useState(true);
     const [training, setTraining] = useState<Record<string, boolean>>({});
+    const [featureImportances, setFeatureImportances] = useState<Record<string, FeatureImportance[]>>({});
 
     useEffect(() => {
         fetchAllModelStatuses();
@@ -43,10 +51,9 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
 
         for (const symbol of symbols) {
             try {
-                const response = await fetch(`http://localhost:8000/models/${symbol}`);
+                const response = await fetch(`${API_BASE_URL}/models/${symbol}`);
                 if (response.ok) {
-                    const data = await response.json();
-                    statuses[symbol] = data;
+                    statuses[symbol] = await response.json();
                 }
             } catch (err) {
                 console.error(`Error fetching status for ${symbol}:`, err);
@@ -55,42 +62,43 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
 
         setModelStatuses(statuses);
         setLoading(false);
+
+        // Fetch feature importances
+        for (const symbol of symbols) {
+            try {
+                const resp = await fetch(`${API_BASE_URL}/models/${symbol}/feature-importance`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    setFeatureImportances(prev => ({ ...prev, [symbol]: data.features }));
+                }
+            } catch {}
+        }
     };
 
     const trainModel = async (symbol: string) => {
         setTraining(prev => ({ ...prev, [symbol]: true }));
 
         try {
-            const response = await fetch(`http://localhost:8000/train/${symbol}`, {
-                method: 'POST'
-            });
-
+            const response = await fetch(`${API_BASE_URL}/train/${symbol}`, { method: 'POST' });
             if (response.ok) {
-                // Refresh status after training
                 setTimeout(() => {
                     fetchAllModelStatuses();
                     setTraining(prev => ({ ...prev, [symbol]: false }));
                 }, 2000);
             } else {
                 setTraining(prev => ({ ...prev, [symbol]: false }));
-                alert(`Failed to train models for ${symbol}`);
             }
-        } catch (err) {
+        } catch {
             setTraining(prev => ({ ...prev, [symbol]: false }));
-            alert(`Error training models for ${symbol}`);
         }
     };
 
     const getModelTypeIcon = (type: string) => {
         switch (type) {
-            case 'lstm':
-                return '🧠';
-            case 'prophet':
-                return '📈';
-            case 'xgboost':
-                return '🌲';
-            default:
-                return '🤖';
+            case 'lstm': return '🧠';
+            case 'prophet': return '📈';
+            case 'xgboost': return '🌲';
+            default: return '🤖';
         }
     };
 
@@ -139,12 +147,13 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
                     const isTrained = status?.status === 'trained';
                     const isTraining = training[symbol];
 
-                    // Find the model with the highest directional accuracy to display as the "latest" percentage
                     const latestModel = isTrained
-                        ? status.models.reduce((prev, current) => 
+                        ? status.models.reduce((prev, current) =>
                             (prev.metrics.directional_accuracy > current.metrics.directional_accuracy) ? prev : current
                           )
                         : null;
+
+                    const fi = featureImportances[symbol];
 
                     return (
                         <div
@@ -194,76 +203,97 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
                                 </button>
                             </div>
 
-                            {/* Latest Accuracy Percentage */}
+                            {/* Latest Accuracy */}
                             {latestModel && (
                                 <div className="bg-slate-800/50 rounded-lg p-4 mb-4 border border-slate-700 flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-slate-500 uppercase tracking-wider">Latest Directional Accuracy</p>
+                                        <p className="text-xs text-slate-500 uppercase tracking-wider">Best Directional Accuracy</p>
                                         <p className={`text-3xl font-bold ${getAccuracyColor(latestModel.metrics.directional_accuracy)}`}>
                                             {latestModel.metrics.directional_accuracy.toFixed(1)}%
                                         </p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-xs text-slate-500">Model Type: <span className="text-white capitalize">{latestModel.type}</span></p>
+                                        <p className="text-xs text-slate-500">Model: <span className="text-white capitalize">{latestModel.type}</span></p>
                                         <p className="text-xs text-slate-500">Version: <span className="text-white">{latestModel.version}</span></p>
                                     </div>
                                 </div>
                             )}
 
-            {/* Models List */}
-            {latestModel && (
-                <div
-                    className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 mt-4"
-                >
-                    <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                            <span className="text-2xl">{getModelTypeIcon(latestModel.type)}</span>
-                            <div>
-                                <h4 className="font-semibold text-white capitalize">
-                                    {latestModel.type}
-                                </h4>
-                                <p className="text-xs text-slate-500">{latestModel.version}</p>
-                            </div>
-                        </div>
+                            {/* Model Details */}
+                            {latestModel && (
+                                <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-2xl">{getModelTypeIcon(latestModel.type)}</span>
+                                            <div>
+                                                <h4 className="font-semibold text-white capitalize">{latestModel.type}</h4>
+                                                <p className="text-xs text-slate-500">{latestModel.version}</p>
+                                            </div>
+                                        </div>
+                                        <div className={`text-right ${getAccuracyColor(latestModel.metrics.directional_accuracy)}`}>
+                                            <div className="text-2xl font-bold">
+                                                {latestModel.metrics.directional_accuracy.toFixed(1)}%
+                                            </div>
+                                            <p className="text-xs text-slate-500">Accuracy</p>
+                                        </div>
+                                    </div>
 
-                        <div className={`text-right ${getAccuracyColor(latestModel.metrics.directional_accuracy)}`}>
-                            <div className="text-2xl font-bold">
-                                {latestModel.metrics.directional_accuracy.toFixed(1)}%
-                            </div>
-                            <p className="text-xs text-slate-500">Accuracy</p>
-                        </div>
-                    </div>
+                                    <div className="grid grid-cols-3 gap-3 text-sm">
+                                        <div>
+                                            <p className="text-slate-500 text-xs">RMSE</p>
+                                            <p className="text-white font-medium">{latestModel.metrics.rmse.toFixed(2)}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-slate-500 text-xs">MAE</p>
+                                            <p className="text-white font-medium">{latestModel.metrics.mae.toFixed(2)}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-slate-500 text-xs">Samples</p>
+                                            <p className="text-white font-medium">{latestModel.training_samples}</p>
+                                        </div>
+                                    </div>
 
-                    {/* Metrics */}
-                    <div className="grid grid-cols-3 gap-3 text-sm">
-                        <div>
-                            <p className="text-slate-500 text-xs">RMSE</p>
-                            <p className="text-white font-medium">{latestModel.metrics.rmse.toFixed(2)}</p>
-                        </div>
-                        <div>
-                            <p className="text-slate-500 text-xs">MAE</p>
-                            <p className="text-white font-medium">{latestModel.metrics.mae.toFixed(2)}</p>
-                        </div>
-                        <div>
-                            <p className="text-slate-500 text-xs">Samples</p>
-                            <p className="text-white font-medium">{latestModel.training_samples}</p>
-                        </div>
-                    </div>
+                                    <div className="mt-3 pt-3 border-t border-slate-700 flex items-center gap-2 text-xs text-slate-400">
+                                        <Clock size={12} />
+                                        Trained: {new Date(latestModel.training_date).toLocaleDateString()}
+                                    </div>
+                                </div>
+                            )}
 
-                    {/* Training Date */}
-                    <div className="mt-3 pt-3 border-t border-slate-700 flex items-center gap-2 text-xs text-slate-400">
-                        <Clock size={12} />
-                        Trained: {new Date(latestModel.training_date).toLocaleDateString()}
-                    </div>
-                </div>
-            )}
-            {!isTrained && (
-                <div className="text-center py-8 text-slate-500">
-                    <AlertTriangle className="mx-auto mb-2" size={32} />
-                    <p className="text-sm">No models trained yet</p>
-                    <p className="text-xs mt-1">Click "Train Models" to get started</p>
-                </div>
-            )}
+                            {/* Feature Importance Chart */}
+                            {fi && fi.length > 0 && (
+                                <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 mt-4">
+                                    <h4 className="text-sm font-semibold text-white mb-3">XGBoost Feature Importance</h4>
+                                    <div className="space-y-2">
+                                        {fi.slice(0, 8).map(f => {
+                                            const maxImp = fi[0].importance;
+                                            const pct = maxImp > 0 ? (f.importance / maxImp) * 100 : 0;
+                                            return (
+                                                <div key={f.name} className="flex items-center gap-2">
+                                                    <span className="text-xs text-slate-400 w-24 truncate text-right">{f.name}</span>
+                                                    <div className="flex-1 bg-slate-700 rounded-full h-2">
+                                                        <div
+                                                            className="bg-indigo-500 h-2 rounded-full"
+                                                            style={{ width: `${pct}%` }}
+                                                        />
+                                                    </div>
+                                                    <span className="text-xs text-slate-500 w-12 text-right">
+                                                        {(f.importance * 100).toFixed(1)}%
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isTrained && (
+                                <div className="text-center py-8 text-slate-500">
+                                    <AlertTriangle className="mx-auto mb-2" size={32} />
+                                    <p className="text-sm">No models trained yet</p>
+                                    <p className="text-xs mt-1">Click "Train Models" to get started</p>
+                                </div>
+                            )}
                         </div>
                     );
                 })}
@@ -272,7 +302,7 @@ const ModelDashboard: React.FC<ModelDashboardProps> = ({
             {/* Info Box */}
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mt-6">
                 <p className="text-sm text-blue-200">
-                    <strong>💡 Tip:</strong> Models should be retrained weekly to capture new market patterns.
+                    <strong>Tip:</strong> Models should be retrained weekly to capture new market patterns.
                     Higher directional accuracy ({">"} 60%) indicates better prediction reliability.
                 </p>
             </div>

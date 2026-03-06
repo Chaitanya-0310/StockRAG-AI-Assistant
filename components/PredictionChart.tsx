@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
-import { TrendingUp, TrendingDown, AlertCircle, Calendar } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertCircle, Calendar, Download } from 'lucide-react';
+import { API_BASE_URL } from '../services/api';
 
 interface PredictionData {
     target_date: string;
@@ -29,7 +30,7 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ symbol, days = 30 }) 
     const fetchPredictions = async () => {
         try {
             setLoading(true);
-            const response = await fetch(`http://localhost:8000/predict/${symbol}?days=${days}`);
+            const response = await fetch(`${API_BASE_URL}/predict/${symbol}?days=${days}`);
 
             if (!response.ok) {
                 throw new Error('Failed to fetch predictions');
@@ -47,7 +48,7 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ symbol, days = 30 }) 
 
     const fetchHistoricalData = async () => {
         try {
-            const response = await fetch(`http://localhost:8000/stock/${symbol}`);
+            const response = await fetch(`${API_BASE_URL}/stock/${symbol}`);
             if (response.ok) {
                 const data = await response.json();
                 // Get last 30 days
@@ -125,11 +126,31 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ symbol, days = 30 }) 
                     </p>
                 </div>
 
-                <div className="text-right">
-                    <div className={`text-2xl font-bold ${trend === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {trend === 'up' ? '+' : ''}{trendPercent}%
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => {
+                            const headers = 'Date,Predicted Price,Confidence Lower,Confidence Upper\n';
+                            const rows = predictions.map(p =>
+                                `${p.target_date},${p.predicted_price.toFixed(2)},${p.confidence_lower.toFixed(2)},${p.confidence_upper.toFixed(2)}`
+                            ).join('\n');
+                            const blob = new Blob([headers + rows], { type: 'text/csv' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${symbol}_predictions.csv`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                        }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-md text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+                    >
+                        <Download size={16} /> CSV
+                    </button>
+                    <div className="text-right">
+                        <div className={`text-2xl font-bold ${trend === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {trend === 'up' ? '+' : ''}{trendPercent}%
+                        </div>
+                        <p className="text-xs text-slate-500">Expected change</p>
                     </div>
-                    <p className="text-xs text-slate-500">Expected change</p>
                 </div>
             </div>
 

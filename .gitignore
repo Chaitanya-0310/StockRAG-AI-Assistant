@@ -7,6 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
 dist
 dist-ssr
@@ -22,8 +23,36 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.env
-.env.example
-.docker-compose.yml 
 
-backend/services/__pycache__/etl_service.cpython-313.pyc
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+venv312/
+
+# MLflow artifacts
+mlartifacts/
+mlruns/
+mlflow.db
+
+# Trained models (large binary files)
+backend/ml_models/
+
+# Debug/temp files
+debug_*.py
+response*.json
+start_backend.ps1
+
+# Backend compiled
+backend/__pycache__/
+backend/error.log
+nginx.conf
+package-lock.json
+package.json
+vite.config.ts
+.github/workflows/ci.yml
+backend/alembic.ini
+backend/alembic/script.py.mako

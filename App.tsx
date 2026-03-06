@@ -5,16 +5,15 @@ import StockDashboard from './components/StockDashboard';
 import PipelineVisualizer from './components/PipelineVisualizer';
 import PredictionChart from './components/PredictionChart';
 import ModelDashboard from './components/ModelDashboard';
-import { getAllTickers } from './services/mockDataService';
+import ErrorBoundary from './components/ErrorBoundary';
 import { LayoutDashboard, MessageSquare, DatabaseZap, Terminal, TrendingUp } from 'lucide-react';
 
 function App() {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.CHAT);
   const [selectedSymbol, setSelectedSymbol] = useState<string>('AAPL');
-  const tickerCount = getAllTickers().length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex">
+    <div className="h-screen overflow-hidden bg-slate-950 text-slate-200 font-sans flex">
       {/* Sidebar */}
       <aside className="w-20 lg:w-64 border-r border-slate-800 bg-slate-900 flex flex-col shrink-0 transition-all">
         <div className="h-20 flex items-center justify-center lg:justify-start lg:px-6 border-b border-slate-800">
@@ -58,10 +57,6 @@ function App() {
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               RAG Engine Online
             </div>
-            <div className="flex items-center gap-2 text-sm text-blue-400 mt-1">
-              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-              {tickerCount} Tickers Indexed
-            </div>
           </div>
         </div>
       </aside>
@@ -72,7 +67,7 @@ function App() {
           <h1 className="text-2xl font-semibold text-white">
             {activeTab === AppTab.CHAT && 'AI Financial Assistant'}
             {activeTab === AppTab.DASHBOARD && 'Market Data Dashboard'}
-            {activeTab === AppTab.PIPELINE && 'Pipeline Configuration'}
+            {activeTab === AppTab.PIPELINE && 'Pipeline Status'}
             {activeTab === AppTab.PREDICTIONS && 'Price Predictions & ML Models'}
           </h1>
 
@@ -87,15 +82,26 @@ function App() {
           </div>
         </header>
 
-        <div className="flex-1 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-opacity-20 relative">
-          {/* Content Wrapper */}
-          <div className="absolute inset-0 overflow-auto">
-            {activeTab === AppTab.CHAT && <div className="h-full p-6"><ChatInterface /></div>}
-            {activeTab === AppTab.DASHBOARD && <StockDashboard />}
-            {activeTab === AppTab.PIPELINE && <PipelineVisualizer />}
-            {activeTab === AppTab.PREDICTIONS && (
-              <div className="p-6 space-y-6">
-                {/* Symbol Selector */}
+        <div className={`flex-1 relative flex flex-col min-h-0 ${activeTab === AppTab.CHAT ? 'overflow-hidden' : 'overflow-auto'}`}>
+          {activeTab === AppTab.CHAT && (
+            <ErrorBoundary fallbackTitle="Chat Error">
+              <ChatInterface />
+            </ErrorBoundary>
+          )}
+          {activeTab === AppTab.DASHBOARD && (
+            <ErrorBoundary fallbackTitle="Dashboard Error">
+              <StockDashboard />
+            </ErrorBoundary>
+          )}
+          {activeTab === AppTab.PIPELINE && (
+            <ErrorBoundary fallbackTitle="Pipeline Error">
+              <PipelineVisualizer />
+            </ErrorBoundary>
+          )}
+          {activeTab === AppTab.PREDICTIONS && (
+            <ErrorBoundary fallbackTitle="Predictions Error">
+              {/* Symbol Selector */}
+              <div className="p-6">
                 <div className="flex items-center gap-4">
                   <label className="text-sm font-medium text-slate-400">Select Stock:</label>
                   <select
@@ -110,28 +116,24 @@ function App() {
                     <option value="TSLA">TSLA - Tesla</option>
                   </select>
                 </div>
-
-                {/* Prediction Chart */}
-                <PredictionChart symbol={selectedSymbol} days={30} />
-
-                {/* Model Dashboard */}
-                <ModelDashboard symbols={['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA']} />
               </div>
-            )}
-          </div>
+
+              <PredictionChart symbol={selectedSymbol} days={30} />
+              <ModelDashboard symbols={['AAPL', 'GOOGL', 'MSFT', 'AMZN', 'TSLA']} />
+            </ErrorBoundary>
+          )}
         </div>
       </main>
     </div>
   );
 }
 
-// Subcomponent for cleaner code
 const SidebarItem = ({ icon, label, isActive, onClick }: { icon: React.ReactNode, label: string, isActive: boolean, onClick: () => void }) => (
   <button
     onClick={onClick}
     className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${isActive
-        ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-600/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]'
-        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+      ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-600/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]'
+      : 'text-slate-400 hover:bg-slate-800 hover:text-white'
       }`}
   >
     <div className={`transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`}>

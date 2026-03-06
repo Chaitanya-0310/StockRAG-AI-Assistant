@@ -10,6 +10,8 @@ pandas
 pydantic
 pydantic-settings
 requests
+cachetools
+slowapi
 
 # ML and Data Science Dependencies
 torch>=2.0.0
@@ -18,7 +20,15 @@ xgboost
 scikit-learn
 mlflow
 joblib
-pandas-ta
 numpy
+pandas-ta
 matplotlib
 seaborn
+
+# Testing
+pytest
+pytest-asyncio
+httpx
+
+# Migrations
+alembic

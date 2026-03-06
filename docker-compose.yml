@@ -12,6 +12,50 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: stockrag_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/stockrag_db
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      CORS_ORIGINS: '["http://localhost:3000", "http://localhost:80"]'
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ml_models:/app/backend/ml_models
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stockrag_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: stockrag_mlflow
+    ports:
+      - "5000:5000"
+    command: mlflow server --host 0.0.0.0 --port 5000
+    volumes:
+      - mlflow_data:/mlflow
 
 volumes:
   postgres_data:
+  ml_models:
+  mlflow_data:

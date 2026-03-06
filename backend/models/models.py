@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, Boolean, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Text, Boolean, JSON, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from pgvector.sqlalchemy import Vector
 from datetime import datetime
@@ -7,6 +7,9 @@ Base = declarative_base()
 
 class StockPrice(Base):
     __tablename__ = "stock_prices"
+    __table_args__ = (
+        UniqueConstraint('symbol', 'date', name='uq_stock_price_symbol_date'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String, index=True)
@@ -24,11 +27,12 @@ class RagDocument(Base):
     symbol = Column(String, index=True)
     date = Column(Date)
     content = Column(Text)  # The text chunk
-    embedding = Column(Vector(768))  # Google text-embedding-004 dimension is 768
+    embedding = Column(Vector(3072))  # gemini-embedding-001 dimension is 3072
+    granularity = Column(String, default='daily')  # 'daily', 'weekly', 'monthly'
 
 class StockPrediction(Base):
     __tablename__ = "stock_predictions"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String, index=True)
     prediction_date = Column(Date, index=True)  # When prediction was made
@@ -40,9 +44,10 @@ class StockPrediction(Base):
     model_type = Column(String)  # 'lstm', 'prophet', 'xgboost', 'ensemble'
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 class MLModel(Base):
     __tablename__ = "ml_models"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String, index=True)
     model_type = Column(String)  # 'lstm', 'prophet', 'xgboost', 'ensemble'
