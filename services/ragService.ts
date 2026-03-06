@@ -1,10 +1,7 @@
 import { StockDataPoint, RagContext, StockTicker } from '../types';
 import { getAllTickers } from './mockDataService';
 
-/**
- * In a real backend, this would involve embedding user queries and searching a vector DB.
- * Here, we implement a "Keyword + Time" based retrieval strategy to simulate RAG logic client-side.
- */
+
 
 // 1. Ingestion: Convert raw JSON rows into "Documents" (Text representations)
 const createDocumentFromRow = (point: StockDataPoint): string => {
@@ -15,12 +12,12 @@ const createDocumentFromRow = (point: StockDataPoint): string => {
 export const retrieveContext = (query: string): RagContext[] => {
   const allTickers = getAllTickers();
   const lowerQuery = query.toLowerCase();
-  
+
   const relevantContexts: RagContext[] = [];
 
   // Keyword extraction (Simple Heuristic)
-  const mentionedSymbols = allTickers.filter(t => 
-    lowerQuery.includes(t.symbol.toLowerCase()) || 
+  const mentionedSymbols = allTickers.filter(t =>
+    lowerQuery.includes(t.symbol.toLowerCase()) ||
     lowerQuery.includes(t.name.toLowerCase().split(' ')[0].toLowerCase())
   );
 
@@ -54,8 +51,7 @@ export const retrieveContext = (query: string): RagContext[] => {
   });
 
   // Sort by score (recency in this heuristic) and take top K chunks to fit in context
-  // Gemini 2.5 Flash has a large context window, so we can be generous, but let's simulate efficient RAG.
-  return relevantContexts.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, 100); 
+  return relevantContexts.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, 100);
 };
 
 
