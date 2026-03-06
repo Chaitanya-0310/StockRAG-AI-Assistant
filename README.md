@@ -446,6 +446,14 @@ npm run type-check
 
 ---
 
+## Screenshots 
+<img width="1914" height="955" alt="Screenshot 2026-03-06 025812" src="https://github.com/user-attachments/assets/461077b5-3ab1-439e-b497-cc18f84a54cb" />
+<img width="1579" height="938" alt="Screenshot 2025-12-17 005010" src="https://github.com/user-attachments/assets/d6ab1059-a68c-4a3e-bd46-6ea29e598901" />
+<img width="1915" height="965" alt="Screenshot 2026-03-06 025724" src="https://github.com/user-attachments/assets/e557191e-6a4e-448e-892e-10da83ba5b98" />
+<img width="1919" height="965" alt="Screenshot 2026-03-06 025736" src="https://github.com/user-attachments/assets/5ea467af-6f0b-40b0-ac48-4505525b7d9d" />
+<img width="1917" height="961" alt="Screenshot 2026-03-06 025758" src="https://github.com/user-attachments/assets/768cbd70-2f4d-419d-81bb-ffc3bbd46a16" />
+
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please follow these steps:
